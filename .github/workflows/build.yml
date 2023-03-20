@@ -1,0 +1,84 @@
+name: Building recovery
+
+on:
+#  release:
+#    types: [published]
+#  push:
+#    branches:
+#      - master
+#    paths:
+#      - '.config'
+#  schedule:
+#    - cron: 0 8 * * 5
+# Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+  watch:
+    types: [started]
+
+env:
+  MANIFEST: https://github.com/SHRP/manifest.git -b shrp-12.1
+  DEVICE: RMX2151
+  DT_LINK: https://github.com/Gofaraway71/shrp_RMX2151_Rui3
+  DT_PATH: device/realme/RMX2151
+  CHAT_ID: ${{ secrets.TEST_CHAT_ID }}
+  BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+  TARGET: recoveryimage
+  TZ: Asia/Kolkata
+
+jobs:
+  build:
+    runs-on: ubuntu-18.04
+
+    steps:
+       - name: Checkout
+         uses: actions/checkout@master
+         
+       # Cleanup The Actions Workspace Using Custom Composite Run Actions
+       - name: Cleanup
+         uses: rokibhasansagar/slimhub_actions@main         
+         
+       - name: Initializing environment
+         run: |
+            git config --global user.name "Gofaraway71/"
+            git config --global user.email "aalbatron@gmail.com"         
+            # sudo -E apt-get -y purge ghc* llvm* firefox powershell mysql* php* 
+            sudo -E apt-get clean 
+            sudo -E apt-get -qq update
+            sudo -E apt-get -qq install bc build-essential zip curl libstdc++6 git wget python gcc clang libssl-dev rsync flex curl  bison aria2
+            sudo curl --create-dirs -L -o /usr/local/bin/repo -O -L https://storage.googleapis.com/git-repo-downloads/repo
+            sudo chmod a+rx /usr/local/bin/repo
+            
+       - name: Sync recovery source and device tree
+         run: |
+             mkdir work
+             cd work
+             repo init -u $MANIFEST --depth=1 --groups=all,-notdefault,-device,-darwin,-x86,-mips
+             repo sync -j4
+             git clone $DT_LINK --depth=1 --single-branch $DT_PATH
+             
+       - name: Building SHRP
+         run: |
+             cd work
+             export ALLOW_MISSING_DEPENDENCIES=true &&. build/envsetup.sh &&lunch omni_$DEVICE-eng &&mka $TARGET
+             
+       - name: Uploading SHRP recovery image
+         run: |
+             cd work/out/target/product/$DEVICE
+             sudo zip -r9 SHRP-RMX2151.zip recovery.img
+             ls > ls.txt
+             #curl -F chat_id=$CHAT_ID -F document=@ls.txt -F parse_mode=markdown https://api.telegram.org/bot$BOT_TOKEN/sendDocument -F caption="Check it out @hraj9258"
+             #curl -F chat_id=$CHAT_ID -F document=@SHRP-RMX2151.zip https://api.telegram.org/bot$BOT_TOKEN/sendDocument -F caption="Please test it @hraj9258"
+             curl -sL https://git.io/file-transfer | sh
+             ./transfer wet SHRP-RMX2151.zip
+             ./transfer wet *.zip
+             ./transfer wet *.img
+             
+       - uses: actions/upload-artifact@v2
+         with:
+          name: recoveryzip
+          path: work/out/target/product/*/*.zip
+
+       - uses: actions/upload-artifact@v2
+         with:
+          name: recoveryimage
+          path: work/out/target/product/*/*.img
